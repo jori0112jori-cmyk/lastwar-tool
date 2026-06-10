@@ -1028,17 +1028,22 @@ function getCombatBasePts(member){
         pts -= penalty;
     }
     // 覚醒ボーナスを戦力スコアに反映
+    // ※育成効率シミュレーション時（member.simulating===true）は
+    //   覚醒前提未達の英雄にボーナスを乗せない
     if (typeof AWAKENING_HEROES !== 'undefined' && AWAKENING_HEROES[member.id]) {
         const awTierStr = loadAwTier(member.id);
         const awObj = (typeof parseAwTier !== 'undefined') ? parseAwTier(awTierStr) : {star:-1,tier:0};
-        if (awObj.star >= 0) {
+        // 覚醒済みの場合のみボーナスを適用
+        // シミュレーション中（simulating）かつ未覚醒の場合はスキップ
+        const isAwakened = awObj.star >= 0;
+        // シミュレーション中（育成効率計算）かつ未覚醒の場合はボーナスをスキップ
+        // → 覚醒前提未達英雄が過大評価されるのを防ぐ
+        const skipBonus = member.simulating && !isAwakened;
+        if (isAwakened && !skipBonus) {
             let bonus = getAwakeningScoreBonus(member.id, awTierStr);
             // テスラ：誘導電流のスタック上限は味方ロケラン英雄数×3
-            // 編成内のロケラン数に応じてボーナスを補正（getCombatBasePts は単体評価なので概算）
             if (member.id === 'tesla' && awObj.star >= 1) {
-                // member.squadMisCount があれば使用、なければ標準値1.0（単体評価時）
                 const misCount = member.squadMisCount || 1;
-                // ロケラン1体=スタック3、2体=6、3体=9（上限15）
                 const stackMult = misCount >= 3 ? 1.08 : misCount >= 2 ? 1.04 : 1.0;
                 bonus *= stackMult;
             }
@@ -2053,7 +2058,9 @@ function calculateUpgradeEfficiencyFull(roster){
         if(hero.wp === 0){
             const ewTarget = (META_TIER[hero.id] && META_TIER[hero.id].ewTarget) ? META_TIER[hero.id].ewTarget : 10;
             simulated[index].wp = ewTarget;
+            simulated[index].simulating = true;
             const newResult = optimizeMultiArmy(simulated, 5);
+            simulated[index].simulating = false;
             let gain = calcMultiArmyTotalScore(newResult.assignment) - baseScore;
             if(gain <= 0) gain = Math.max(1, Math.round(__aiGetLongterm(hero.id) * 18 - 6));
             gain = Math.round(gain * __aiTypePolicyMult(hero.t, context, 'future') * __aiHeroBias(hero.id, 'future', context) * __aiSynergyBias(hero, roster, ewTarget));
@@ -2066,7 +2073,9 @@ function calculateUpgradeEfficiencyFull(roster){
         const ms = getNextMilestone(hero.wp);
         if(!ms) return;
         simulated[index].wp = ms.target;
+        simulated[index].simulating = true;  // 覚醒ボーナスを現状のみ反映するフラグ
         const newResult = optimizeMultiArmy(simulated, 5);
+        simulated[index].simulating = false;
         let gain = Math.round(calcMultiArmyTotalScore(newResult.assignment) - baseScore);
         if(gain <= 0){
             const delta = Math.max(1, Math.round((wpToPts(ms.target) - wpToPts(hero.wp)) * (((META_TIER[hero.id]||{}).ew === 'SSS') ? 1.15 : 1.0)));
