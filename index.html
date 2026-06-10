@@ -3374,7 +3374,7 @@ function __buildAwakeningAdvice(heroId, ewLv) {
   if (!next) return '';
   const bonus = (aw.starBonuses || {})[next.nextStar] || '';
   const tierLabel = next.nextTier > 0 ? '★'+next.nextStar+'-'+next.nextTier : '★'+next.nextStar+'解放';
-  return '👑 次：' + tierLabel + '（' + next.cost + 'シャード）' + (bonus ? ' → ' + bonus.substring(0,20)+'...' : '');
+  return '👑 次：' + tierLabel + '（覚醒かけら：' + next.cost + '）' + (bonus ? ' → ' + bonus.substring(0,20)+'...' : '');
 }
 
 function __aiBuildReasonCodes(meta){
