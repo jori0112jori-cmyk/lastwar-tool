@@ -43,7 +43,7 @@ const META_TIER = {
 const META_SHIFT = {
   core: {
     tank:   { ids:['kimberly','williams','stetmann'], targets:[30,20,20] },
-    air:    { ids:['lucius','dva'],                   targets:[30,30] },
+    air:    { ids:['lucius','dva'],                   targets:[30,20] },  // DVAはLv20で覚醒前提を満たす
     missile:{ ids:['fiona','tesla','mcgregor'],        targets:[30,20,20] }
   },
   mult: {
@@ -512,7 +512,13 @@ const AWAKENING_HEROES = {
       '4-5': '★5解放：エネルギー増幅1スタックにつき追加1発発砲（MAX）→★5到達'
     },
     communityNotes: '★1（決意状態の自動発動）と★3（エネルギー増幅2スタック先行獲得）が特に強力。EW Lv30前提ならキム覚醒が最優先。',
-    scoreBonus: { 0:1.12, 1:1.28, 2:1.38, 3:1.52, 4:1.65 }
+    // scoreBonus 根拠：
+    // ★0: 超絶感知（体力/攻撃/防御+20%）即適用 → ×1.20
+    // ★1: 決意状態自動発動（会心+10%）実戦インパクト中 → ×1.26
+    // ★2: 追加ダメージ+20% → ×1.38
+    // ★3: エネルギー増幅2スタック先行（発数最大化に直結、最大火力インパクト大） → ×1.55
+    // ★4: 追加ダメージ+40%（合計+60%） → ×1.68
+    scoreBonus: { 0:1.20, 1:1.26, 2:1.38, 3:1.55, 4:1.68, 5:1.82 } // ★5: 増幅スタックごと追加1発
   },
   dva: {
     available: true,
@@ -533,7 +539,13 @@ const AWAKENING_HEROES = {
       '4-5': '★5解放：滞空時間を1秒延長（最大強化）→★5到達'
     },
     communityNotes: '航空機英雄が多いほどスタックが積みやすい。★0解放だけで超絶感知による基礎ステ+20%が即適用されるため解放コスパが高い。',
-    scoreBonus: { 0:1.10, 1:1.22, 2:1.34, 3:1.45, 4:1.58 }
+    // scoreBonus 根拠：
+    // ★0: 超絶感知（体力/攻撃/防御+20%）即適用 → ×1.20
+    // ★1: エースの矜持スタック追加強化（航空機数依存、平均2体想定） → ×1.28
+    // ★2: 追撃ダメージ+20% → ×1.36
+    // ★3: エースの矜持1スタックにつき攻撃力+5% → ×1.44
+    // ★4: 追撃+40%・滞空+1秒（MAX） → ×1.56
+    scoreBonus: { 0:1.20, 1:1.28, 2:1.36, 3:1.44, 4:1.56, 5:1.68 } // ★5: 滞空+1秒
   },
   tesla: {
     available: true,
@@ -553,7 +565,13 @@ const AWAKENING_HEROES = {
       '4-5': '★5解放：反射回数さらに+1（計9回）（MAX）→★5到達'
     },
     communityNotes: '★1の誘導電流DoTとフィオナの組み合わせが強力。スタック上限は味方ロケラン英雄数×3（最大15）。ロケラン軸ガチ勢は最優先候補。',
-    scoreBonus: { 0:1.08, 1:1.20, 2:1.30, 3:1.42, 4:1.55 }
+    // scoreBonus 根拠：
+    // ★0: 超絶感知（体力/攻撃/防御+20%）即適用 → ×1.20
+    // ★1: 誘導電流DoT（攻撃力×3%/秒×30秒、ロケラン数×3スタック上限）→ ×1.28
+    // ★2: 追加ダメージ+20% → ×1.35
+    // ★3: 反射回数+1（7→8回）→ ×1.44
+    // ★4: 追加ダメージ+40%・反射さらに+1（9回）→ ×1.58
+    scoreBonus: { 0:1.20, 1:1.28, 2:1.35, 3:1.44, 4:1.58, 5:1.72 } // ★5: 反射+1（計9回）
   }
 };
 
@@ -597,9 +615,9 @@ function getAwakeningScoreBonus(heroId, awTierStr) {
   const at = parseAwTier(awTierStr);
   if (at.star < 0) return 1.0;
   const base = aw.scoreBonus[at.star] || 1.0;
-  const next = aw.scoreBonus[Math.min(4, at.star + 1)] || base;
+  const next = aw.scoreBonus[Math.min(5, at.star + 1)] || base;
   const frac = at.tier / 5;
-  return base + (next - base) * frac * 0.5;
+  return base + (next - base) * frac;  // ティア進行度をフルに反映
 }
 
 // 次のティアへのコスト

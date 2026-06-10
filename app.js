@@ -25,6 +25,9 @@ let previousAssignment = null;
 
 // === Shared helpers for squad-based transition/progress ===
 function wpToPts(wp){
+  // EW Lv → スコアポイント換算
+  // 実際のゲーム：Lv10/20/30が主要節目、Lv1〜9の伸びは小さい
+  // Lv0=50, Lv1=55, Lv5=75, Lv10=160, Lv20=260, Lv30=430
   wp = parseInt(wp, 10);
   if(!Number.isFinite(wp)) return 0;
   if(wp <= 0) return 50;
@@ -33,7 +36,7 @@ function wpToPts(wp){
   if (wp >= 30) pts += 360;
   else if (wp >= 20) pts += 190 + (wp - 20) * 8;
   else if (wp >= 10) pts += 90 + (wp - 10) * 5;
-  else pts += 20 + wp * 3;
+  else pts += 5 + wp * 2;   // Lv1〜9: 伸び小（5+wp*2）← 旧: 20+wp*3
   return pts;
 }
 
@@ -1029,7 +1032,16 @@ function getCombatBasePts(member){
         const awTierStr = loadAwTier(member.id);
         const awObj = (typeof parseAwTier !== 'undefined') ? parseAwTier(awTierStr) : {star:-1,tier:0};
         if (awObj.star >= 0) {
-            const bonus = getAwakeningScoreBonus(member.id, awTierStr);
+            let bonus = getAwakeningScoreBonus(member.id, awTierStr);
+            // テスラ：誘導電流のスタック上限は味方ロケラン英雄数×3
+            // 編成内のロケラン数に応じてボーナスを補正（getCombatBasePts は単体評価なので概算）
+            if (member.id === 'tesla' && awObj.star >= 1) {
+                // member.squadMisCount があれば使用、なければ標準値1.0（単体評価時）
+                const misCount = member.squadMisCount || 1;
+                // ロケラン1体=スタック3、2体=6、3体=9（上限15）
+                const stackMult = misCount >= 3 ? 1.08 : misCount >= 2 ? 1.04 : 1.0;
+                bonus *= stackMult;
+            }
             pts = Math.round(pts * bonus);
         }
     }
@@ -1042,7 +1054,10 @@ function evaluateSquadRealCombat(squadMembers) {
         attack: 0, defense: 0, totalPts: 0, buffedTotalPts: 0
     };
 
+    // テスラ覚醒のスタック上限計算用にロケラン英雄数を付与
+    const misCount = squadMembers.filter(m => m.t === 'mis').length;
     squadMembers.forEach(m => {
+        m.squadMisCount = misCount;
         m.basePts = getCombatBasePts(m);
     });
 
@@ -1059,11 +1074,17 @@ function evaluateSquadRealCombat(squadMembers) {
     squadMembers.forEach(m => { if(roleCounts[m.r] !== undefined) roleCounts[m.r]++; });
 
     let compMult = 1.0;
-    if(roleCounts.wall >= 2) compMult *= (roleCounts.wall === 2 ? 1.05 : 0.98);
-    else if(roleCounts.wall === 1) compMult *= 0.92;
-    else compMult *= 0.85;
-
-    if(roleCounts.atk === 0) compMult *= 0.80;
+    if(roleCounts.wall >= 2) {
+        if(roleCounts.wall === 2)       compMult *= 1.05;
+        else if(roleCounts.wall === 3)  compMult *= 0.95;
+        else                            compMult *= 0.88; // 4体以上は過剰
+    } else if(roleCounts.wall === 1) {
+        compMult *= 0.92;
+    } else {
+        compMult *= 0.85;
+    }
+    // atk==0ペナルティ：wall>=3の場合は既にペナルティ済みなので適用しない
+    if(roleCounts.atk === 0 && roleCounts.wall < 3) compMult *= 0.80;
     if(roleCounts.sup >= 2) compMult *= 0.97;
 
     squadMembers.forEach(m => {
@@ -1090,7 +1111,8 @@ function evaluateSquadRealCombat(squadMembers) {
     });
 
     let currentMeta = ($id('current-meta')||{}).value || '';
-    let metaMult = (mainType === currentMeta) ? 1.12 : 1.0;
+    // メタ一致ボーナス：実際は相手依存のため控えめに+7%
+    let metaMult = (mainType === currentMeta) ? 1.07 : 1.0;
 
     // S6覚醒混成ボーナス
     // 覚醒済みキム(tank)+DVA(air)が同じ編成にいる場合、4+1混成を正当評価
@@ -1102,10 +1124,19 @@ function evaluateSquadRealCombat(squadMembers) {
         const hasKim = ids.includes('kimberly') && kimAw.star >= 0;
         const hasDva = ids.includes('dva')       && dvaAw.star >= 0;
         if (hasKim && hasDva) {
-            // 両方覚醒済み → 混成ペナルティを緩和（出張ペナルティが過大評価になるため）
-            awakeningMixBonus = 1.08;
+            // キム+DVA両方覚醒済み → 混成ペナルティ緩和
+            // DVAのEW Lv依存：低Lvでは出張ペナルティが大きく混成ボーナスが薄い
+            const dvaMember = squadMembers.find(m => m.id === 'dva');
+            const dvaWp = dvaMember ? (dvaMember.wp || 0) : 0;
+            const dvaWpMult = dvaWp >= 20 ? 1.06 : dvaWp >= 10 ? 1.02 : 0.98;
+            // 航空機英雄数でDVAのスタック効率が変わる
+            const airCount = squadMembers.filter(m => m.t === 'air').length;
+            const dvaAirMult = airCount >= 2 ? 1.04 : 1.0;
+            // DVA覚醒★が高いほど恩恵大
+            const dvaStarMult = dvaAw.star >= 2 ? 1.02 : 1.0;
+            awakeningMixBonus = dvaWpMult * dvaAirMult * dvaStarMult;
         } else if (hasKim && kimAw.star >= 1) {
-            // キム単独覚醒★1以上 → 戦車軸スコアを小幅補正
+            // キム単独覚醒★1以上
             awakeningMixBonus = 1.04;
         }
     }
