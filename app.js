@@ -774,7 +774,7 @@ function topRankCardHtml(rank, item, opts){
           ${(()=>{
             const hid = safeItem.id||safeItem.key||safeItem.heroId||'';
             const advice = __buildAwakeningAdvice(hid, safeItem.wp || safeItem.from || 0);
-            return advice ? `<div class="rankhero-summary" style="color:#fbbf24;border-left:2px solid #f59e0b;padding-left:6px;margin-top:3px;">${escapeHtml(advice)}</div>` : '';
+            return advice ? `<div class="rankhero-summary" style="color:#ef4444;border-left:2px solid #b91c1c;padding-left:6px;margin-top:3px;">${escapeHtml(advice)}</div>` : '';
           })()}
           <div class="rankhero-bottomline">
             <div class="rankhero-leftline">
@@ -1492,7 +1492,7 @@ function __buildAwakeningAdvice(heroId, ewLv) {
   if (!next) return '';
   const bonus = (aw.starBonuses || {})[next.nextStar] || '';
   const tierLabel = next.nextTier > 0 ? '★'+next.nextStar+'-'+next.nextTier : '★'+next.nextStar+'解放';
-  return '👑 次：' + tierLabel + '（' + next.cost + 'シャード）' + (bonus ? ' → ' + bonus.substring(0,20)+'...' : '');
+  return '👑 次：' + tierLabel + '（覚醒かけら：' + next.cost + '）' + (bonus ? ' → ' + bonus.substring(0,20)+'...' : '');
 }
 
 function __aiBuildReasonCodes(meta){
@@ -2822,11 +2822,11 @@ function renderAwTierUI(awTierStr, aw) {
     for (let s = 0; s <= 4; s++) {
         const isCurrentStar = (currentStar === s);
         const isCompletedStar = (currentStar > s);
-        const labelColor = isCompletedStar ? '#fbbf24' : (isCurrentStar ? '#fde68a' : '#9ca3af');
+        const labelColor = isCompletedStar ? '#ef4444' : (isCurrentStar ? '#fca5a5' : '#9ca3af');
 
         // ★s-5到達バッジ（右端）
         const reachBadge = isCompletedStar
-            ? `<span style="font-size:0.72rem;font-weight:900;color:#fbbf24;margin-left:3px;flex-shrink:0;">★${reachedStar(s)}</span>`
+            ? `<span style="font-size:0.72rem;font-weight:900;color:#ef4444;margin-left:3px;flex-shrink:0;">★${reachedStar(s)}</span>`
             : `<span style="width:20px;flex-shrink:0;"></span>`;
 
         html += `<div style="display:flex;align-items:center;gap:4px;margin-bottom:5px;">`;
@@ -2840,9 +2840,10 @@ function renderAwTierUI(awTierStr, aw) {
             const isGoal = (t === 5);
             const isKey  = (s === 0 && t === 1); // ★0-1のみ専用かけら×50
             const shards = isKey ? '専用覚醒かけら×50' : ((typeof AW_SHARD_PER_TIER !== 'undefined' ? AW_SHARD_PER_TIER[s] : 20) + 'シャード');
-            const bg  = filled ? (isKey ? '#b45309' : isGoal ? '#d97706' : '#f59e0b') : '#1f2937';
-            const bd  = isCurrent ? '#ffffff' : (filled ? (isKey ? '#fde68a' : isGoal ? '#fde68a' : '#f59e0b') : (isGoal ? '#6b7280' : '#374151'));
-            const tc  = filled ? '#1a0900' : '#9ca3af';
+            // 赤系統カラー：🔑=深紅、通常filled=赤、goal(5番目)=濃い赤
+            const bg  = filled ? (isKey ? '#7f1d1d' : isGoal ? '#b91c1c' : '#ef4444') : '#1f2937';
+            const bd  = isCurrent ? '#ffffff' : (filled ? (isKey ? '#fca5a5' : isGoal ? '#fca5a5' : '#ef4444') : (isGoal ? '#6b7280' : '#374151'));
+            const tc  = filled ? '#fff1f1' : '#9ca3af';
             const lbl = isKey ? '🔑' : (isGoal ? '★' : t);
             const fs  = isKey ? '0.68rem' : (isGoal ? '0.75rem' : '0.7rem');
             html += `<div onclick="setAwTier(${s},${t})"
