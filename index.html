@@ -1013,8 +1013,13 @@ body.keep-eval-collapse .slot-army.slot-collapsed .slot-eval{ display:block !imp
         </div>
         
         <div id="eff-panel" class="panel route-panel">
-            <div class="panel-title" style="color:#c026d3;">🚀 育成優先ランキング</div>
+            <div class="panel-title" style="color:#c026d3;">🔧 専用武装 育成優先ランキング</div>
             <div id="eff-result" class="suggestion-box">正確なコストと編成診断に基づき、最も効果的な強化先を提案します。</div>
+        </div>
+
+        <div id="awaken-rank-panel" class="panel route-panel" style="display:none;">
+            <div class="panel-title" style="color:#ef4444;">👑 英雄覚醒 優先ランキング</div>
+            <div id="awaken-rank-result" class="suggestion-box">覚醒対象英雄（キンバリー・DVA・テスラ）の次の強化ティアと優先度を表示します。</div>
         </div>
 
         
@@ -2519,9 +2524,11 @@ function effCardHtml(rank, item, opts){
   safeItem.roleKey = safeItem.roleKey || safeItem.r;
   safeItem.name = safeItem.name || safeItem.n;
 
-  const lvLine = (safeItem.from !== undefined && safeItem.to !== undefined)
-    ? `<span class="eff-lv">(Lv${safeItem.from}→${safeItem.to})</span>`
-    : '';
+  const lvLine = safeItem.isAwakeningItem
+    ? `<span class="eff-lv" style="color:#ef4444;font-weight:900;">👑 覚醒 ${safeItem.awTierStr==='none'?'未覚醒':'★'+safeItem.awTierStr} → ★${safeItem.nextTierStr}</span>`
+    : (safeItem.from !== undefined && safeItem.to !== undefined)
+      ? `<span class="eff-lv">(Lv${safeItem.from}→${safeItem.to})</span>`
+      : '';
 
   const badge = (mode === 'normal' && safeItem.growthType) ? growthBadge(safeItem.growthType) : (opts.rightBadge || '');
 
@@ -2530,9 +2537,11 @@ function effCardHtml(rank, item, opts){
     const unlockLv = (safeItem.to !== undefined) ? ` <span class="eff-lv">(Lv${safeItem.from||0}→${safeItem.to})</span>` : '';
     sub = `<div class="eff-sub"><span class="eff-subline">解放時${unlockLv} <span class="eff-plus">+${safeItem.gain}</span></span></div>`;
   }else{
-    const costPart = (safeItem.cost !== undefined && safeItem.cost !== null)
-      ? `<span class="gear-cost"><span class="sep">あと</span><img src="${SHARD_ICON_SRC}" alt="gear"> <span class="gear-num">${safeItem.cost}</span></span>`
-      : '';
+    const costPart = safeItem.isAwakeningItem
+      ? `<span class="gear-cost"><span class="sep">あと</span>${safeItem.nextShardNamed ? '🔑専用' : '<img src="img/kakusei.webp" style="width:30px;height:30px;vertical-align:middle;">'} <span class="gear-num">×${safeItem.nextShardCost}</span></span>`
+      : (safeItem.cost !== undefined && safeItem.cost !== null)
+        ? `<span class="gear-cost"><span class="sep">あと</span><img src="${SHARD_ICON_SRC}" alt="gear"> <span class="gear-num">${safeItem.cost}</span></span>`
+        : '';
     sub = `<div class="eff-sub"><span class="eff-subline"><span class="eff-plus">+${safeItem.gain}</span>${costPart ? ' ' + costPart : ''}</span></div>`;
   }
 
@@ -3893,6 +3902,7 @@ function calculateUpgradeEfficiencyFull(roster){
 
     let normalResults = [];
     let unlockResults = [];
+    let awakenResults = [];  // 覚醒強化候補（専用武装ランキングとは別）
 
     roster.forEach((hero,index)=>{
         if(hero.ur) return;
@@ -3976,8 +3986,65 @@ function calculateUpgradeEfficiencyFull(roster){
         });
     });
 
+    // isAwakeningItem を normalResults から除外（専用武装ランキングを純粋に保つ）
+    normalResults = normalResults.filter(r => !r.isAwakeningItem);
     normalResults.sort((a,b)=> (b.efficiency-a.efficiency) || (b.gain-a.gain));
     unlockResults.sort((a,b)=> b.gain-a.gain);
+
+    // -------------------------------------------------------
+    // 覚醒ランキング用データを別途構築（normalResultsには混入させない）
+    // キンバリー(Lv30)など EW MAX で次のEW強化がない英雄が対象
+    // -------------------------------------------------------
+    if (typeof AWAKENING_HEROES !== 'undefined' && typeof loadAwTier !== 'undefined') {
+        roster.forEach(hero => {
+            const aw = AWAKENING_HEROES[hero.id];
+            if (!aw || !aw.available) return;
+            if (hero.wp < (aw.ewMinRequired || 20)) return; // 前提未達はスキップ
+            const awTierStr = loadAwTier(hero.id);
+            const at = parseAwTier(awTierStr);
+            if (at.star >= 4 && at.tier >= 5) return; // 覚醒MAX
+            const next = awNextTierCost(awTierStr);
+            if (!next) return;
+
+            // スコア上昇量計算
+            const BASE_PTS = wpToPts(hero.wp);
+            const curBonus  = getAwakeningScoreBonus(hero.id, awTierStr);
+            const nextTierStr = next.nextStar + '-' + next.nextTier;
+            const nextBonus = getAwakeningScoreBonus(hero.id, nextTierStr);
+            const ptGain = Math.round(BASE_PTS * (nextBonus - curBonus));
+            if (ptGain <= 0) return;
+
+            // コスト換算（専用かけら×15, 汎用かけら×10 強化石換算）
+            const convRate = next.named ? 15 : 10;
+            const costEquiv = next.cost * convRate;
+            const efficiency = ptGain / Math.max(1, Math.pow(costEquiv, 0.52));
+
+            // 重複チェック（同英雄がEWランキングにも出てる場合はawaken版を優先）
+            const awItem = {
+                id: hero.id,
+                name: hero.name || (HEROES[hero.id]||{}).n || hero.id,
+                type: hero.t,
+                gain: ptGain,
+                efficiency,
+                roleKey: hero.r || 'atk',
+                roleBadge: getRoleBadge(hero.r || 'atk'),
+                from: hero.wp,
+                to: hero.wp, // EW変化なし
+                awTierStr,
+                nextTierStr,
+                nextShardCost: next.cost,
+                nextShardNamed: next.named,
+                isAwakeningItem: true,
+                growthType: { level: 3, axis: 'atk', label: '覚醒強化', strong: true },
+                reasonCodes: ['awakening', at.star >= 1 ? 'future' : 'immediate'],
+                costTierLabel: costEquiv >= 800 ? '高コスト' : '低コスト',
+                safeHintLabel: ''
+            };
+
+            awakenResults.push(awItem);
+        });
+        awakenResults.sort((a,b)=> (b.efficiency-a.efficiency) || (b.gain-a.gain));
+    }
 
     const used = new Set();
     const pickTop = (key, label, axis='bal') => {
@@ -3998,7 +4065,7 @@ function calculateUpgradeEfficiencyFull(roster){
     if(coveragePick) reinforceList.push(coveragePick);
     if(futurePick) reinforceList.push(futurePick);
 
-    return { normal: normalResults, unlock: unlockResults, weakness1, weakness2, weakness3, reinforceList };
+    return { normal: normalResults, unlock: unlockResults, awaken: awakenResults, weakness1, weakness2, weakness3, reinforceList };
 }
 
 
@@ -4320,6 +4387,76 @@ if(effData.normal.length > 0){
     }
 
     $id('eff-result').innerHTML = effOut || "<div style='color:#64748b; font-size:0.85rem;'>強化可能なキャラがいません。</div>";
+
+    // -------------------------------------------------------
+    // 覚醒ランキングパネルを描画
+    // -------------------------------------------------------
+    renderAwakenRanking(effData.awaken || []);
+}
+
+function renderAwakenRanking(awakenResults) {
+    const panel  = document.getElementById('awaken-rank-panel');
+    const result = document.getElementById('awaken-rank-result');
+    if (!panel || !result) return;
+
+    if (!awakenResults || awakenResults.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = 'block';
+
+    const heroNames = { kimberly:'キンバリー', dva:'DVA', tesla:'テスラ' };
+
+    let html = '';
+    awakenResults.forEach((item, i) => {
+        const rank    = i + 1;
+        const isBest  = rank === 1;
+        const aw      = (typeof AWAKENING_HEROES !== 'undefined') ? AWAKENING_HEROES[item.id] : null;
+        const heroImg = `img/${item.id}.webp`;
+        const name    = heroNames[item.id] || item.name;
+        const curTier = item.awTierStr === 'none' ? '未覚醒' : '★' + item.awTierStr;
+        const nxtTier = '★' + item.nextTierStr;
+        const shardLabel = item.nextShardNamed
+            ? `🔑 専用かけら×${item.nextShardCost}`
+            : `<img src="img/kakusei.webp" style="width:30px;height:30px;vertical-align:middle;margin-right:2px;">汎用かけら×${item.nextShardCost}`;
+
+        // ボーナステキスト
+        const bonusTxt = aw ? ((aw.tierBonuses || {})[item.nextTierStr.replace('★','')] || '') : '';
+
+        // EW vs 覚醒コスパバー
+        const effNorm = Math.min(100, Math.round(item.efficiency * 8));
+
+        html += `
+        <div style="padding:12px 0; border-bottom:1px solid #f1f5f9; ${isBest?'background:linear-gradient(90deg,rgba(239,68,68,0.04),transparent);border-radius:10px;padding:12px 8px;':''}">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <!-- アバター -->
+            <div style="flex-shrink:0;text-align:center;width:52px;">
+              ${isBest ? '<div style="font-size:0.65rem;font-weight:900;color:#ef4444;margin-bottom:2px;">👑 最優先</div>' : `<div style="font-size:0.65rem;font-weight:900;color:#94a3b8;margin-bottom:2px;">${rank}位</div>`}
+              <div style="width:44px;height:44px;margin:0 auto;border-radius:12px;overflow:hidden;background:#0b1220;border:2px solid ${isBest?'#ef4444':'#e2e8f0'};">
+                <img src="${heroImg}" style="width:100%;height:100%;object-fit:cover;"
+                     onerror="this.style.display='none'">
+              </div>
+              <div style="margin-top:4px;font-size:0.78rem;font-weight:900;color:#1f2937;">${name}</div>
+            </div>
+            <!-- 情報 -->
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+                <span style="font-size:0.82rem;font-weight:900;color:#ef4444;">${curTier} → ${nxtTier}</span>
+                <span style="font-size:0.72rem;background:#fff1f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;padding:1px 6px;font-weight:900;">${shardLabel}</span>
+              </div>
+              ${bonusTxt ? `<div style="font-size:0.72rem;color:#065f46;background:#ecfdf5;border-left:2px solid #10b981;padding:3px 6px;border-radius:4px;margin-bottom:4px;">${bonusTxt}</div>` : ''}
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div style="flex:1;background:#f1f5f9;border-radius:4px;height:5px;">
+                  <div style="background:linear-gradient(90deg,#ef4444,#b91c1c);width:${effNorm}%;height:100%;border-radius:4px;"></div>
+                </div>
+                <span style="font-size:0.75rem;font-weight:900;color:#64748b;">+${item.gain}pt</span>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    });
+
+    result.innerHTML = html || '<div style="color:#64748b;font-size:0.85rem;">覚醒対象英雄が見つかりません。</div>';
 }
 
 function applyMultiArmy() {
@@ -4774,20 +4911,142 @@ function renderAwTierUI(awTierStr, aw) {
         commHint.style.display = 'block';
         commHint.innerText = '💬 海外ガチ勢: ' + (aw.communityNotes || '');
     }
+
+    // EW vs 覚醒 優先度判定パネル更新
+    try { updateEwVsAwakenPanel(heroId, ewLv, awTierStr, aw); } catch(e) {}
+}
+
+function updateEwVsAwakenPanel(heroId, ewLv, awTierStr, aw) {
+    const panel = document.getElementById('ew-vs-awaken-panel');
+    if (!panel || !aw) return;
+
+    const at = (typeof parseAwTier !== 'undefined') ? parseAwTier(awTierStr) : { star:-1, tier:0 };
+    const nextEwLv = ewLv < 10 ? 10 : ewLv < 20 ? 20 : ewLv < 30 ? 30 : null;
+
+    // EWスコア上昇量を計算
+    function ewPts(lv) {
+        lv = Math.max(0, Math.min(30, lv));
+        let p = 70;
+        if(lv>=30) p+=360; else if(lv>=20) p+=190+(lv-20)*8;
+        else if(lv>=10) p+=90+(lv-10)*5; else p+=5+lv*2;
+        return p;
+    }
+
+    // EW強化のコストあたりスコア上昇
+    const EW_COST = { 10:280, 20:800, 30:1600 }; // 強化石概算
+    let ewGain = 0, ewCost = 0, ewLabel = '';
+    if (nextEwLv) {
+        ewGain = ewPts(nextEwLv) - ewPts(ewLv);
+        ewCost = EW_COST[nextEwLv] || 999;
+        ewLabel = `EW Lv${ewLv}→${nextEwLv}`;
+    }
+
+    // 覚醒次ティアのコストあたりスコア上昇
+    const BASE_PTS = ewPts(ewLv);
+    let awGain = 0, awCost = 0, awLabel = '';
+
+    if (at.star < 0) {
+        // 未覚醒 → ★0-1: 専用かけら×50、スコア×1.20
+        if (ewLv >= (aw.ewMinRequired || 20)) {
+            awGain = Math.round(BASE_PTS * (1.20 - 1.0));
+            awCost = 50; // 専用かけら（換算値：1個≒15強化石相当とする）
+            awLabel = '覚醒★0-1（専用かけら×50）';
+        }
+    } else {
+        const next = (typeof awNextTierCost !== 'undefined') ? awNextTierCost(awTierStr) : null;
+        if (next) {
+            const curBonus  = (typeof getAwakeningScoreBonus !== 'undefined') ? getAwakeningScoreBonus(heroId, awTierStr) : 1.0;
+            const nextTierStr = next.nextStar + '-' + next.nextTier;
+            const nextBonus = (typeof getAwakeningScoreBonus !== 'undefined') ? getAwakeningScoreBonus(heroId, nextTierStr) : 1.0;
+            awGain = Math.round(BASE_PTS * (nextBonus - curBonus));
+            // 専用かけら→強化石換算（1かけら≒15強化石）、汎用かけら→1かけら≒10強化石
+            const convRate = next.named ? 15 : 10;
+            awCost = next.cost * convRate;
+            awLabel = `覚醒${nextTierStr}（${next.named ? '専用' : '汎用'}かけら×${next.cost}）`;
+        }
+    }
+
+    panel.style.display = 'block';
+
+    // 判定
+    let html = '<div style="font-weight:900;color:#334155;margin-bottom:6px;">⚖️ EW強化 vs 覚醒 優先度</div>';
+
+    // EW前提未達
+    if (ewLv < (aw.ewMinRequired || 20)) {
+        html += `<div style="color:#b91c1c;font-weight:700;">🔒 EW Lv${aw.ewMinRequired}未達 → まずEW強化が必須</div>`;
+        panel.innerHTML = html;
+        return;
+    }
+
+    // EW MAX
+    if (!nextEwLv && awGain > 0) {
+        html += `<div style="color:#065f46;font-weight:700;">✅ EW MAX → 覚醒を優先</div>`;
+        if (awLabel) html += `<div style="color:#374151;">次: ${awLabel}（+${awGain}pt）</div>`;
+        panel.innerHTML = html;
+        return;
+    }
+
+    // コスパ比較
+    const ewEff  = nextEwLv ? (ewGain / Math.max(1, ewCost) * 1000) : 0;
+    const awEff  = awGain   ? (awGain  / Math.max(1, awCost) * 1000) : 0;
+
+    if (ewEff > 0 || awEff > 0) {
+        const ewBar  = Math.round((ewEff  / Math.max(ewEff, awEff, 0.001)) * 100);
+        const awBar  = Math.round((awEff  / Math.max(ewEff, awEff, 0.001)) * 100);
+        const winner = awEff >= ewEff ? 'awaken' : 'ew';
+
+        html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">`;
+
+        // EW列
+        const ewColor = winner === 'ew' ? '#1e3a8a' : '#64748b';
+        const ewBg    = winner === 'ew' ? '#eff6ff' : '#f1f5f9';
+        html += `<div style="background:${ewBg};border-radius:8px;padding:6px 8px;border:1px solid ${winner==='ew'?'#bfdbfe':'#e2e8f0'};">`;
+        html += `<div style="color:${ewColor};font-weight:900;">🔧 ${ewLabel || 'EW MAX'}</div>`;
+        if (nextEwLv) {
+            html += `<div style="color:#475569;">+${ewGain}pt / 強化石${ewCost}個</div>`;
+            html += `<div style="background:#e2e8f0;border-radius:4px;height:6px;margin-top:4px;"><div style="background:${winner==='ew'?'#3b82f6':'#94a3b8'};width:${ewBar}%;height:100%;border-radius:4px;"></div></div>`;
+        }
+        html += `</div>`;
+
+        // 覚醒列
+        const awColor = winner === 'awaken' ? '#7f1d1d' : '#64748b';
+        const awBg    = winner === 'awaken' ? '#fff1f2' : '#f1f5f9';
+        html += `<div style="background:${awBg};border-radius:8px;padding:6px 8px;border:1px solid ${winner==='awaken'?'#fecaca':'#e2e8f0'};">`;
+        html += `<div style="color:${awColor};font-weight:900;">👑 ${awLabel || '覚醒なし'}</div>`;
+        if (awGain > 0) {
+            html += `<div style="color:#475569;">+${awGain}pt / 換算${awCost}強化石</div>`;
+            html += `<div style="background:#e2e8f0;border-radius:4px;height:6px;margin-top:4px;"><div style="background:${winner==='awaken'?'#ef4444':'#94a3b8'};width:${awBar}%;height:100%;border-radius:4px;"></div></div>`;
+        } else {
+            html += `<div style="color:#94a3b8;">（覚醒MAX or 前提未達）</div>`;
+        }
+        html += `</div>`;
+        html += `</div>`;
+
+        // 推奨メッセージ
+        const margin = Math.abs(awEff - ewEff) / Math.max(awEff, ewEff, 0.001);
+        if (margin < 0.15) {
+            html += `<div style="margin-top:6px;color:#92400e;font-weight:700;">⚠️ コスパはほぼ同等 — 覚醒かけらの在庫次第で判断</div>`;
+        } else if (winner === 'awaken') {
+            html += `<div style="margin-top:6px;color:#7f1d1d;font-weight:700;">✅ 覚醒優先がコスパ良好</div>`;
+        } else {
+            html += `<div style="margin-top:6px;color:#1e3a8a;font-weight:700;">✅ EW強化優先がコスパ良好</div>`;
+        }
+    }
+
+    panel.innerHTML = html;
 }
 
 function setAwTier(star, tier) {
     const heroId = (document.getElementById('slot-modal-hero') || {}).value;
     const aw = (typeof AWAKENING_HEROES !== 'undefined') ? AWAKENING_HEROES[heroId] : null;
-    // star=-1 → 未覚醒
-    // star=0, tier=1〜5 → ★0-1〜★0-5（tier=1は専用かけら×50、以降20シャード）
-    // ★N-5タップ = ★(N+1)到達 → star=N+1, tier=0 として繰り上げ
     let s = star, t = tier;
     if (s >= 0 && t >= 5) { s = s + 1; t = 0; }
     if (s > 5) { s = 5; t = 0; }
     const tierStr = (s < 0) ? 'none' : (s + '-' + t);
     __slotModalState.awTier = tierStr;
     renderAwTierUI(tierStr, aw);
+    // EW vs 覚醒パネル更新
+    try { updateEwVsAwakenPanel(heroId, __slotModalState.lv, tierStr, aw); } catch(e) {}
 }
 
 function awTierKey(heroId) { return 'awTier_' + heroId; }
@@ -5737,6 +5996,8 @@ try{ window.getArmyTypeCounts = getArmyTypeCounts; window.getArmyBuffInfo = getA
         </div>
         <div id="awaken-bonus-hint" class="awaken-bonus-hint" style="display:none;"></div>
         <div id="awaken-community-hint" class="awaken-community-hint" style="display:none;"></div>
+        <!-- EW vs 覚醒 優先度判定 -->
+        <div id="ew-vs-awaken-panel" style="display:none; margin-top:10px; padding:8px 10px; border-radius:10px; border:1px solid #e2e8f0; background:#f8fafc; font-size:0.75rem; line-height:1.6;"></div>
       </div>
     </div>
     <div class="modal-foot">
